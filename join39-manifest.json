@@ -4,7 +4,7 @@
   "description": "Simulate and visualize multi-agent orchestration as a retro terminal dashboard. Agents are assigned roles (Coordinator, Worker, Validator, Tool, Memory) and communicate through configurable network topologies (star, mesh, pipeline). Returns an orchestration summary with a link to an animated visualization showing message-passing in real time.",
   "version": "1.0.0",
   "category": "fun",
-  "apiEndpoint": "YOUR_RAILWAY_URL/api/orchestrate",
+  "apiEndpoint": "https://web-production-cd0e3.up.railway.app/api/orchestrate",
   "httpMethod": "POST",
   "auth": {
     "type": "none"
