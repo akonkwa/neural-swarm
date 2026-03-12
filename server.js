@@ -145,6 +145,14 @@ function simulateSwarm(task, agentCount, topology) {
   };
 }
 
+// ── Helpers ──────────────────────────────────────────
+function getBaseUrl(req) {
+  if (process.env.BASE_URL) return process.env.BASE_URL;
+  const proto = req.get('x-forwarded-proto') || req.protocol;
+  const host = req.get('x-forwarded-host') || req.get('host');
+  return `${proto}://${host}`;
+}
+
 // ── Routes ──────────────────────────────────────────
 
 // POST — primary Join39 endpoint
@@ -166,7 +174,7 @@ app.post('/api/orchestrate', (req, res) => {
     messages_exchanged: sim.messages.length,
     total_latency_ms: sim.totalLatency,
     result: sim.result,
-    visualization: `${BASE_URL}/viz/${sessionId}`,
+    visualization: `${getBaseUrl(req)}/viz/${sessionId}`,
   });
 });
 
@@ -189,7 +197,7 @@ app.get('/api/orchestrate', (req, res) => {
     messages_exchanged: sim.messages.length,
     total_latency_ms: sim.totalLatency,
     result: sim.result,
-    visualization: `${BASE_URL}/viz/${sessionId}`,
+    visualization: `${getBaseUrl(req)}/viz/${sessionId}`,
   });
 });
 
