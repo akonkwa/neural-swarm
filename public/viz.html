@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neural Swarm Monitor</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0e14;
+    --panel: #0d1117;
+    --border: #1a2332;
+    --text: #8b949e;
+    --text-bright: #c9d1d9;
+    --green: #00ff41;
+    --cyan: #00ffff;
+    --magenta: #ff00ff;
+    --gold: #ffd700;
+    --orange: #ff6b35;
+    --red: #ff3333;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+    overflow: hidden;
+    height: 100vh;
+    position: relative;
+  }
+
+  /* CRT scanline overlay */
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background: repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0,0,0,0.08) 2px,
+      rgba(0,0,0,0.08) 4px
+    );
+    pointer-events: none;
+    z-index: 100;
+  }
+
+  /* Layout */
+  .container {
+    display: grid;
+    grid-template-rows: 48px 1fr 36px minmax(140px, 25%);
+    height: 100vh;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  /* ── Header ────────────────────── */
+  .header {
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse-dot 1.5s ease-in-out infinite;
+  }
+
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .header-title {
+    color: var(--green);
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-shadow: 0 0 10px rgba(0,255,65,0.3);
+  }
+
+  .header-right {
+    display: flex;
+    gap: 20px;
+    font-size: 11px;
+    letter-spacing: 1px;
+  }
+
+  .header-right span { color: var(--text); }
+  .header-right .val { color: var(--text-bright); }
+
+  /* ── Canvas area ───────────────── */
+  .canvas-wrap {
+    background: var(--bg);
+    position: relative;
+    overflow: hidden;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Stats bar ─────────────────── */
+  .stats-bar {
+    background: var(--panel);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    gap: 16px;
+    font-size: 11px;
+    letter-spacing: 1px;
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+
+  .stat { display: flex; gap: 6px; }
+  .stat-label { color: var(--text); }
+  .stat-val { color: var(--green); font-weight: 600; }
+  .stat-val.cyan { color: var(--cyan); }
+  .stat-val.magenta { color: var(--magenta); }
+  .stat-val.gold { color: var(--gold); }
+
+  .progress-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .progress-bar {
+    flex: 1;
+    min-width: 60px;
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid #2d333b;
+  }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--green), var(--cyan));
+    box-shadow: 0 0 8px var(--green);
+    transition: width 0.3s;
+    width: 0%;
+  }
+
+  /* ── Message log ───────────────── */
+  .log-panel {
+    background: var(--panel);
+    overflow-y: auto;
+    padding: 8px 16px;
+    font-size: 12px;
+    line-height: 1.7;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .log-entry {
+    opacity: 0;
+    animation: fade-in 0.3s forwards;
+  }
+
+  @keyframes fade-in {
+    to { opacity: 1; }
+  }
+
+  .log-time { color: #484f58; }
+  .log-arrow { color: var(--text); }
+  .log-type { font-weight: 600; }
+  .log-type.delegate { color: var(--cyan); }
+  .log-type.result { color: var(--green); }
+  .log-type.tool_call { color: var(--gold); }
+  .log-type.tool_result { color: var(--gold); }
+  .log-type.verify { color: var(--magenta); }
+  .log-type.approved { color: var(--magenta); }
+  .log-type.task { color: var(--green); }
+  .log-type.think { color: #7c3aed; }
+  .log-type.query { color: var(--orange); }
+  .log-type.data { color: var(--orange); }
+  .log-type.complete { color: var(--green); }
+  .log-content { color: var(--text-bright); }
+
+  /* ── Legend overlay ────────────── */
+  .legend {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: rgba(13,17,23,0.9);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 10px;
+    line-height: 1.8;
+    z-index: 10;
+    max-width: 110px;
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+  }
+
+  /* ── Loading state ─────────────── */
+  .loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    color: var(--green);
+    font-size: 16px;
+    letter-spacing: 3px;
+    animation: blink 1s step-end infinite;
+  }
+
+  @keyframes blink {
+    50% { opacity: 0; }
+  }
+
+  .error-msg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    color: var(--red);
+    font-size: 14px;
+  }
+
+  /* Speed controls */
+  .speed-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+  }
+
+  .speed-btn {
+    background: var(--border);
+    border: 1px solid #2d333b;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 1px;
+  }
+
+  .speed-btn.active {
+    background: var(--green);
+    color: var(--bg);
+    border-color: var(--green);
+  }
+
+  .speed-btn:hover { border-color: var(--text); }
+
+  .replay-btn {
+    background: transparent;
+    border: 1px solid var(--green);
+    color: var(--green);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 2px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    margin-left: 8px;
+    transition: all 0.2s;
+  }
+
+  .replay-btn:hover {
+    background: var(--green);
+    color: var(--bg);
+  }
+</style>
+</head>
+<body>
+
+<div id="loading" class="loading">NEURAL SWARM INITIALIZING...</div>
+<div id="error" class="error-msg" style="display:none"></div>
+
+<div id="app" class="container" style="display:none">
+  <div class="header">
+    <div class="header-left">
+      <div class="status-dot" id="statusDot"></div>
+      <div class="header-title">NEURAL SWARM MONITOR</div>
+    </div>
+    <div class="header-right">
+      <span>TOPOLOGY: <span class="val" id="hTopo">—</span></span>
+      <span>AGENTS: <span class="val" id="hAgents">—</span></span>
+      <span>TASK: <span class="val" id="hTask">—</span></span>
+      <button class="replay-btn" id="replayBtn">&#x21BB; REPLAY</button>
+    </div>
+  </div>
+
+  <div class="canvas-wrap">
+    <canvas id="canvas"></canvas>
+    <div class="legend" id="legend"></div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat"><span class="stat-label">MSGS</span><span class="stat-val cyan" id="sMsgs">0/0</span></div>
+    <div class="stat"><span class="stat-label">LATENCY</span><span class="stat-val gold" id="sLat">0ms</span></div>
+    <div class="stat"><span class="stat-label">PHASE</span><span class="stat-val magenta" id="sPhase">—</span></div>
+    <div class="progress-wrap">
+      <span class="stat-label">PROGRESS</span>
+      <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    <div class="speed-controls">
+      <span class="stat-label">SPEED</span>
+      <button class="speed-btn" data-speed="0.5">0.5x</button>
+      <button class="speed-btn active" data-speed="1">1x</button>
+      <button class="speed-btn" data-speed="2">2x</button>
+      <button class="speed-btn" data-speed="4">4x</button>
+    </div>
+  </div>
+
+  <div class="log-panel" id="logPanel"></div>
+</div>
+
+<script>
+// ── Globals ──────────────────────────────────────────
+let session = null;
+let nodes = [];       // { id, role, x, y, color, symbol, label, radius, pulseT }
+let edges = [];       // { from, to, x1, y1, x2, y2 }
+let particles = [];   // active message particles
+let msgIndex = 0;     // next message to dispatch
+let simTime = 0;      // virtual clock (ms)
+let speed = 1;
+let lastFrame = 0;
+let canvasW, canvasH;
+let ctx;
+let dpr;
+
+const MSG_SPEED = 0.0015;  // fraction of path per ms at 1x (slower for visibility)
+const NODE_RADIUS = 22;
+const PARTICLE_RADIUS = 5;
+
+const TYPE_COLORS = {
+  task: '#00ff41', delegate: '#00ffff', result: '#00ff41',
+  tool_call: '#ffd700', tool_result: '#ffd700',
+  verify: '#ff00ff', approved: '#ff00ff',
+  think: '#7c3aed', query: '#ff6b35', data: '#ff6b35',
+  complete: '#00ff41',
+};
+
+const PHASE_NAMES = ['INIT', 'MEMORY', 'DECOMPOSE', 'DELEGATE', 'EXECUTE', 'VALIDATE', 'COMPLETE'];
+
+// ── Bootstrap ────────────────────────────────────────
+(async function boot() {
+  const sessionId = window.location.pathname.split('/').pop();
+  try {
+    const res = await fetch(`/api/session/${sessionId}`);
+    if (!res.ok) throw new Error('Session not found or expired');
+    session = await res.json();
+    initUI();
+    initCanvas();
+    computeLayout();
+    buildEdges();
+    buildLegend();
+    requestAnimationFrame(loop);
+  } catch (e) {
+    document.getElementById('loading').style.display = 'none';
+    const err = document.getElementById('error');
+    err.style.display = 'flex';
+    err.textContent = `ERROR: ${e.message}`;
+  }
+})();
+
+function initUI() {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'grid';
+  document.getElementById('hTopo').textContent = session.topology.toUpperCase();
+  document.getElementById('hAgents').textContent = session.agents.length;
+  document.getElementById('hTask').textContent = (session.task || '').slice(0, 40) + ((session.task || '').length > 40 ? '...' : '');
+
+  // Speed buttons
+  document.querySelectorAll('.speed-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      speed = parseFloat(btn.dataset.speed);
+      document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // Replay button
+  document.getElementById('replayBtn').addEventListener('click', () => {
+    msgIndex = 0;
+    simTime = 0;
+    lastFrame = 0;
+    particles = [];
+    nodes.forEach(n => n.pulseT = 0);
+    document.getElementById('logPanel').innerHTML = '';
+    document.getElementById('statusDot').style.animation = 'pulse-dot 1.5s ease-in-out infinite';
+  });
+}
+
+function initCanvas() {
+  const canvas = document.getElementById('canvas');
+  const wrap = canvas.parentElement;
+  dpr = window.devicePixelRatio || 1;
+  canvasW = wrap.clientWidth;
+  canvasH = wrap.clientHeight;
+  canvas.width = canvasW * dpr;
+  canvas.height = canvasH * dpr;
+  ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  window.addEventListener('resize', () => {
+    canvasW = wrap.clientWidth;
+    canvasH = wrap.clientHeight;
+    canvas.width = canvasW * dpr;
+    canvas.height = canvasH * dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    computeLayout();
+    buildEdges();
+  });
+}
+
+// ── Layout (position nodes) ─────────────────────────
+function computeLayout() {
+  const cx = canvasW / 2;
+  const cy = canvasH / 2;
+  const agents = session.agents;
+  const topo = session.topology;
+  nodes = [];
+
+  if (topo === 'star') {
+    // Coordinator at center, rest in a circle
+    const angleStep = (2 * Math.PI) / (agents.length - 1);
+    const radius = Math.min(canvasW, canvasH) * 0.32;
+    agents.forEach((a, i) => {
+      if (i === 0) {
+        nodes.push({ ...a, x: cx, y: cy, radius: NODE_RADIUS + 4, pulseT: 0 });
+      } else {
+        const angle = -Math.PI / 2 + angleStep * (i - 1);
+        nodes.push({
+          ...a,
+          x: cx + Math.cos(angle) * radius,
+          y: cy + Math.sin(angle) * radius,
+          radius: NODE_RADIUS,
+          pulseT: 0,
+        });
+      }
+    });
+  } else if (topo === 'mesh') {
+    // All in a circle
+    const angleStep = (2 * Math.PI) / agents.length;
+    const radius = Math.min(canvasW, canvasH) * 0.32;
+    agents.forEach((a, i) => {
+      const angle = -Math.PI / 2 + angleStep * i;
+      nodes.push({
+        ...a,
+        x: cx + Math.cos(angle) * radius,
+        y: cy + Math.sin(angle) * radius,
+        radius: NODE_RADIUS,
+        pulseT: 0,
+      });
+    });
+  } else {
+    // Pipeline — left to right
+    const coord = agents.find(a => a.role === 'coordinator');
+    const workers = agents.filter(a => a.role === 'worker');
+    const validator = agents.find(a => a.role === 'validator');
+    const tool = agents.find(a => a.role === 'tool');
+    const memory = agents.find(a => a.role === 'memory');
+    const mainLine = [coord, ...workers, validator].filter(Boolean);
+    const pad = 80;
+    const usableW = canvasW - pad * 2;
+    const step = usableW / (mainLine.length - 1 || 1);
+
+    mainLine.forEach((a, i) => {
+      nodes.push({ ...a, x: pad + step * i, y: cy, radius: NODE_RADIUS, pulseT: 0 });
+    });
+    if (tool) {
+      nodes.push({ ...tool, x: pad + step * 0.5, y: cy - 80, radius: NODE_RADIUS, pulseT: 0 });
+    }
+    if (memory) {
+      nodes.push({ ...memory, x: pad, y: cy - 80, radius: NODE_RADIUS, pulseT: 0 });
+    }
+  }
+}
+
+function buildEdges() {
+  edges = session.connections.map(c => {
+    const from = nodes.find(n => n.id === c.from);
+    const to = nodes.find(n => n.id === c.to);
+    if (!from || !to) return null;
+    return { from: c.from, to: c.to, x1: from.x, y1: from.y, x2: to.x, y2: to.y };
+  }).filter(Boolean);
+}
+
+function buildLegend() {
+  const legend = document.getElementById('legend');
+  const roles = [...new Set(session.agents.map(a => a.role))];
+  const roleInfo = {
+    coordinator: { color: '#00ff41', label: 'Coordinator' },
+    worker: { color: '#00ffff', label: 'Worker' },
+    validator: { color: '#ff00ff', label: 'Validator' },
+    tool: { color: '#ffd700', label: 'Tool' },
+    memory: { color: '#ff6b35', label: 'Memory' },
+  };
+  legend.innerHTML = roles.map(r => {
+    const info = roleInfo[r] || { color: '#888', label: r };
+    return `<div class="legend-item">
+      <span class="legend-dot" style="background:${info.color};box-shadow:0 0 6px ${info.color}"></span>
+      <span style="color:${info.color}">${info.label}</span>
+    </div>`;
+  }).join('');
+}
+
+// ── Animation Loop ───────────────────────────────────
+function loop(ts) {
+  if (!lastFrame) lastFrame = ts;
+  const dt = (ts - lastFrame) * speed;
+  lastFrame = ts;
+  simTime += dt;
+
+  // Dispatch new messages
+  while (msgIndex < session.messages.length) {
+    const msg = session.messages[msgIndex];
+    if (msg.time <= simTime) {
+      dispatchMessage(msg, msgIndex);
+      msgIndex++;
+    } else break;
+  }
+
+  // Update particles
+  particles.forEach(p => {
+    p.t += MSG_SPEED * dt;
+    if (p.t >= 1) {
+      p.alive = false;
+      // Pulse destination node
+      const dest = nodes.find(n => n.id === p.to);
+      if (dest) dest.pulseT = 1;
+    }
+  });
+  particles = particles.filter(p => p.alive);
+
+  // Update node pulse
+  nodes.forEach(n => {
+    if (n.pulseT > 0) n.pulseT = Math.max(0, n.pulseT - dt * 0.003);
+  });
+
+  // Update stats
+  updateStats();
+
+  // Render
+  render();
+  requestAnimationFrame(loop);
+}
+
+function dispatchMessage(msg, idx) {
+  const fromNode = nodes.find(n => n.id === msg.from);
+  const toNode = nodes.find(n => n.id === msg.to);
+
+  if (fromNode && toNode && fromNode.id !== toNode.id) {
+    particles.push({
+      from: msg.from, to: msg.to,
+      x1: fromNode.x, y1: fromNode.y,
+      x2: toNode.x, y2: toNode.y,
+      t: 0,
+      color: TYPE_COLORS[msg.type] || '#ffffff',
+      alive: true,
+    });
+    fromNode.pulseT = 1;
+  } else if (fromNode) {
+    fromNode.pulseT = 1;
+  }
+
+  // Add log entry
+  addLogEntry(msg);
+}
+
+function addLogEntry(msg) {
+  const log = document.getElementById('logPanel');
+  const timeStr = String(Math.round(msg.time)).padStart(5, '0');
+  const fromLabel = msg.from === 'SYS' ? 'SYS' : msg.from;
+  const toLabel = msg.to === 'SYS' ? 'SYS' : msg.to;
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = `<span class="log-time">[${timeStr}ms]</span> `
+    + `<span style="color:${getNodeColor(msg.from)}">${fromLabel}</span> `
+    + `<span class="log-arrow">\u2192</span> `
+    + `<span style="color:${getNodeColor(msg.to)}">${toLabel}</span> `
+    + `<span class="log-type ${msg.type}">${msg.type}</span> `
+    + `<span class="log-content">"${msg.content}"</span>`;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function getNodeColor(id) {
+  if (id === 'SYS') return '#00ff41';
+  const n = nodes.find(n => n.id === id);
+  return n ? n.color : '#8b949e';
+}
+
+function updateStats() {
+  const total = session.messages.length;
+  document.getElementById('sMsgs').textContent = `${Math.min(msgIndex, total)}/${total}`;
+
+  const elapsedLat = session.messages.slice(0, msgIndex).reduce((s, m) => s + m.latency, 0);
+  document.getElementById('sLat').textContent = `${elapsedLat}ms`;
+
+  // Determine phase
+  let phase = 0;
+  if (msgIndex > 0) {
+    const lastType = session.messages[Math.min(msgIndex, total) - 1]?.type;
+    if (lastType === 'complete') phase = 6;
+    else if (lastType === 'approved') phase = 5;
+    else if (lastType === 'verify') phase = 5;
+    else if (['result', 'tool_call', 'tool_result'].includes(lastType)) phase = 4;
+    else if (lastType === 'delegate') phase = 3;
+    else if (lastType === 'think') phase = 2;
+    else if (['query', 'data'].includes(lastType)) phase = 1;
+    else phase = 0;
+  }
+  document.getElementById('sPhase').textContent = PHASE_NAMES[phase];
+  document.getElementById('progressFill').style.width = `${(msgIndex / total * 100).toFixed(0)}%`;
+
+  // Update status dot
+  const dot = document.getElementById('statusDot');
+  if (msgIndex >= total) {
+    dot.style.background = '#00ff41';
+    dot.style.animation = 'none';
+  }
+}
+
+// ── Canvas Rendering ─────────────────────────────────
+function render() {
+  ctx.clearRect(0, 0, canvasW, canvasH);
+
+  drawGrid();
+  drawEdges();
+  drawParticles();
+  drawNodes();
+}
+
+function drawGrid() {
+  ctx.strokeStyle = 'rgba(26,35,50,0.5)';
+  ctx.lineWidth = 0.5;
+  const step = 40;
+  for (let x = step; x < canvasW; x += step) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvasH); ctx.stroke();
+  }
+  for (let y = step; y < canvasH; y += step) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvasW, y); ctx.stroke();
+  }
+}
+
+function drawEdges() {
+  edges.forEach(e => {
+    // Check if this edge is "active" (has a particle on it)
+    const active = particles.some(p =>
+      (p.from === e.from && p.to === e.to) || (p.from === e.to && p.to === e.from));
+
+    ctx.strokeStyle = active ? 'rgba(255,255,255,0.25)' : 'rgba(26,35,50,0.8)';
+    ctx.lineWidth = active ? 1.5 : 1;
+
+    if (active) {
+      ctx.shadowColor = 'rgba(255,255,255,0.15)';
+      ctx.shadowBlur = 6;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(e.x1, e.y1);
+    ctx.lineTo(e.x2, e.y2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  });
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    const x = p.x1 + (p.x2 - p.x1) * p.t;
+    const y = p.y1 + (p.y2 - p.y1) * p.t;
+
+    // Trail
+    const trailLen = 6;
+    for (let i = trailLen; i >= 0; i--) {
+      const tt = Math.max(0, p.t - i * 0.02);
+      const tx = p.x1 + (p.x2 - p.x1) * tt;
+      const ty = p.y1 + (p.y2 - p.y1) * tt;
+      const alpha = (1 - i / trailLen) * 0.6;
+      const r = PARTICLE_RADIUS * (1 - i / trailLen * 0.5);
+      ctx.beginPath();
+      ctx.arc(tx, ty, r, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRGBA(p.color, alpha);
+      ctx.fill();
+    }
+
+    // Main dot
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(x, y, PARTICLE_RADIUS, 0, Math.PI * 2);
+    ctx.fillStyle = p.color;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+}
+
+function drawNodes() {
+  nodes.forEach(n => {
+    const r = n.radius + n.pulseT * 8;
+
+    // Outer glow
+    if (n.pulseT > 0) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, r + 10, 0, Math.PI * 2);
+      ctx.fillStyle = hexToRGBA(n.color, n.pulseT * 0.15);
+      ctx.fill();
+    }
+
+    // Ring
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.strokeStyle = n.color;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = n.color;
+    ctx.shadowBlur = 10 + n.pulseT * 15;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Fill
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r - 2, 0, Math.PI * 2);
+    ctx.fillStyle = hexToRGBA(n.color, 0.1 + n.pulseT * 0.2);
+    ctx.fill();
+
+    // Label
+    ctx.font = '600 11px IBM Plex Mono';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = n.color;
+    ctx.shadowColor = n.color;
+    ctx.shadowBlur = 4;
+    ctx.fillText(n.id, n.x, n.y);
+    ctx.shadowBlur = 0;
+
+    // Role label below
+    ctx.font = '10px IBM Plex Mono';
+    ctx.fillStyle = hexToRGBA(n.color, 0.6);
+    ctx.fillText(n.label, n.x, n.y + r + 14);
+  });
+}
+
+// ── Helpers ──────────────────────────────────────────
+function hexToRGBA(hex, alpha) {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+</script>
+</body>
+</html>

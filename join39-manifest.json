@@ -1,0 +1,35 @@
+{
+  "name": "neural-swarm",
+  "displayName": "Neural Swarm",
+  "description": "Simulate and visualize multi-agent orchestration as a retro terminal dashboard. Agents are assigned roles (Coordinator, Worker, Validator, Tool, Memory) and communicate through configurable network topologies (star, mesh, pipeline). Returns an orchestration summary with a link to an animated visualization showing message-passing in real time.",
+  "version": "1.0.0",
+  "category": "fun",
+  "apiEndpoint": "YOUR_RAILWAY_URL/api/orchestrate",
+  "httpMethod": "POST",
+  "auth": {
+    "type": "none"
+  },
+  "functionDefinition": {
+    "name": "neural-swarm",
+    "description": "Simulate multi-agent orchestration for a given task. Spawns a swarm of agents with roles (coordinator, workers, validator, optional tool and memory nodes) that communicate through a network topology. Returns an orchestration summary and a link to an animated retro terminal visualization. Call this when a user wants to see how agents work together, visualize agent communication, or simulate task decomposition across multiple agents.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "task": {
+          "type": "string",
+          "description": "The task to orchestrate across the agent swarm (e.g., 'Analyze customer reviews', 'Deploy microservices')"
+        },
+        "agents": {
+          "type": "number",
+          "description": "Number of agents in the swarm (3-8). More agents = more workers. 5+ adds a Tool node, 7+ adds Memory. Default: 5"
+        },
+        "topology": {
+          "type": "string",
+          "enum": ["star", "mesh", "pipeline"],
+          "description": "Network topology: 'star' (hub-spoke via coordinator), 'mesh' (fully connected), 'pipeline' (sequential left-to-right). Default: star"
+        }
+      },
+      "required": ["task"]
+    }
+  }
+}
